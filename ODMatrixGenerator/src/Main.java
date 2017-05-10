@@ -1,35 +1,148 @@
-import java.awt.List;
+import java.io.BufferedWriter;
+import java.io.File;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.io.Writer;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Random;
+
+import javax.rmi.CORBA.Tie;
 
 import hdf.hdf5lib.H5;
 import hdf.hdf5lib.HDF5Constants;
-import hdf.hdf5lib.exceptions.HDF5Exception;
 import hdf.hdf5lib.exceptions.HDF5LibraryException;
 
 public class Main {
-    private static String FILENAME = "Villeurbanne.h5";
-    private static String ACTIVITY_DENSITY_GROUPNAME = "kde_activity_30";
-    private static String RESIDENTIAL_DENSITY_GROUPNAME = "kde_residential_30";
-    private static String GRID_GROUPNAME = "xy_grid_30";
-    private static String DATASETNAME = "block0_values";
+    private static final String FILENAME = "input\\Villeurbanne.h5";
+    private static final String ACTIVITY_DENSITY_GROUPNAME = "kde_activity_30";
+    private static final String RESIDENTIAL_DENSITY_GROUPNAME = "kde_residential_30";
+    private static final String GRID_GROUPNAME = "xy_grid_30";
+    private static final String DATASETNAME = "block0_values";
+    private static String outputFile="output\\trajectories.txt";
 
     private static double [][] activityDensityMatrix;
     private static double [][] residentialDensityMatrix;
-    private static double [][][] coordMatrix;
-    private static ArrayList<LatLongCoordinate> coordList =  new ArrayList<LatLongCoordinate>();
-    private static ArrayList<Double> activityDensityList =  new ArrayList();
-    private static ArrayList<Double> residentialDensityList =  new ArrayList();
-
+    private static double [][][] coordUTMMatrix;
+    
+    private static ArrayList<LatLongCoordinate> coordList;
+    private static ArrayList<Double> activityDensityList;
+    private static ArrayList<Double> residentialDensityList;
+    
+    private static ArrayList<Trajectory> trajectories;
     
     public static void main(String[] args) {
     	loadData();
+    	/* displayMatrix(activityDensityMatrix);   
+        displayMatrix(residentialDensityMatrix);   
+        displayMatrix(coordMatrix);*/
+    	matrixToLists();
+    	listsToCumulativeLists();
+    	
+    	/*System.out.println(activityDensityList.get(activityDensityList.size()-1));
+    	System.out.println(residentialDensityList.get(residentialDensityList.size()-1));
+    	*/
+    	generateTrajectories(1000);
+
+    /*	for (int i=0;i<trajectories.size();i++)
+    		System.out.println(trajectories.get(i).getStarting()+" "+trajectories.get(i).getArrival());*/
+    	
+    	//writeTrajectories();
+    	
+    	JSONFileWriter.writeTrajectories(trajectories, "trajectories.json");
     }
     
+    
+    
+    private static void writeTrajectories() {
+		FileWriter writer;
+		try {
+			writer = new FileWriter(outputFile);
+			for(Trajectory t: trajectories) {
+				  writer.write(t.toString());
+				  writer.write("\n");
+			}
+			writer.close();
+			
+		} catch (IOException e) {
+			e.printStackTrace();
+			throw new RuntimeException(e);
+		} 
+	}
 
+
+
+	private static void generateTrajectories(int nbTrajects) {  	
+		trajectories = new ArrayList<>();
+		 Random rand = new Random(987654321);
+		 // Random rand = new Random(System.currentTimeMillis());
+		 for(int i=0; i < nbTrajects; i++)
+		 {
+			 int activityIterator = 0;
+			 int residentialIterator = 0;
+			 double randActiv = rand.nextDouble();
+			 double randResid = rand.nextDouble();
+
+			 while(activityIterator< activityDensityList.size() &&
+					 residentialIterator < residentialDensityList.size() && 
+					 (randActiv>activityDensityList.get(activityIterator) || 
+							 randResid> residentialDensityList.get(residentialIterator)))
+			 {
+				 if(randActiv>activityDensityList.get(activityIterator))
+						 activityIterator++;
+				 if(randResid>residentialDensityList.get(residentialIterator))
+					 residentialIterator++;
+			 }
+			 LatLongCoordinate residence = new LatLongCoordinate(coordList.get(residentialIterator));
+			 LatLongCoordinate activity =  new LatLongCoordinate(coordList.get(activityIterator));
+			 trajectories.add(new Trajectory(residence, activity));
+		 }
+	}
+
+
+
+	private static void listsToCumulativeLists() {
+		for(int i=1; i< activityDensityList.size(); i++)
+			activityDensityList.set(i, activityDensityList.get(i)+activityDensityList.get(i-1));
+		for(int i=1; i< residentialDensityList.size(); i++)
+			residentialDensityList.set(i, residentialDensityList.get(i)+residentialDensityList.get(i-1));
+	}
+
+
+
+	private static void matrixToLists() {
+    	coordList =  new ArrayList<LatLongCoordinate>();
+    	activityDensityList =  new ArrayList();
+    	residentialDensityList =  new ArrayList();
+    	
+    	for (int j = 0; j < coordUTMMatrix[0].length; j++) {
+    		for (int i = 0; i < coordUTMMatrix.length; i++) {
+    			UTMCoordinate utm=new UTMCoordinate(coordUTMMatrix[i][j][0], coordUTMMatrix[i][j][1], 31, 'T');
+    			LatLongCoordinate latlong=new LatLongCoordinate(utm);
+    			coordList.add(latlong);
+    		}   
+    	}
+    	
+    	for (int i = 0; i < activityDensityMatrix.length; i++) {
+    		for (int j = 0; j < activityDensityMatrix[0].length; j++) {
+    			activityDensityList.add(activityDensityMatrix[i][j]);
+    		}
+    	}
+
+    	for (int i = 0; i < residentialDensityMatrix.length; i++) {
+    		for (int j = 0; j < residentialDensityMatrix[0].length; j++) {
+    			residentialDensityList.add(residentialDensityMatrix[i][j]);
+             }
+         } 
+	}
+
+
+
+	//Load data from .h5 file in matrix
 	private static void loadData() {
-	    int file_id = -1;
+		int file_id = -1;
 
-        // Open file
         try {
             file_id = H5.H5Fopen(FILENAME, HDF5Constants.H5F_ACC_RDONLY, HDF5Constants.H5P_DEFAULT);
         }
@@ -38,11 +151,10 @@ public class Main {
             throw new RuntimeException(e);
         }
         
-        activityDensityMatrix = loadDensity(file_id, ACTIVITY_DENSITY_GROUPNAME);
-        residentialDensityMatrix = loadDensity(file_id, RESIDENTIAL_DENSITY_GROUPNAME);
-        loadCoord(file_id);
+        loadMatrix(file_id, ACTIVITY_DENSITY_GROUPNAME);
+        loadMatrix(file_id, RESIDENTIAL_DENSITY_GROUPNAME);
+        loadMatrix(file_id, GRID_GROUPNAME);
         
-        // Close access to data and release resources.
         try {
         	if (file_id >= 0)
                 H5.H5Fclose(file_id);
@@ -51,218 +163,87 @@ public class Main {
             e.printStackTrace();
             throw new RuntimeException(e);
         }
-        
-     /* displayMatrix(activityDensityMatrix);   
-        displayMatrix(residentialDensityMatrix);   
-        displayMatrix(coordMatrix);*/
-        
-        for (int i = 0; i < coordMatrix.length; i++) {
-	        for (int j = 0; j < coordMatrix[0].length; j++) {
-	        	UTMCoordinate utm=new UTMCoordinate(coordMatrix[i][j][0], coordMatrix[i][j][1], 31, 'T');
-	        	LatLongCoordinate latlong=new LatLongCoordinate(utm);
-	        	coordList.add(latlong);
-	        }
-        }
-        
-        double sum=0;
-        for (int i = 0; i < activityDensityMatrix.length; i++) {
-            for (int j = 0; j < activityDensityMatrix[0].length; j++) {
-            	activityDensityList.add(activityDensityMatrix[i][j]);
-            	sum+=activityDensityMatrix[i][j];
-            }
-        }
-        System.out.println(sum);	
-        System.out.println(activityDensityList.get(0));
-        
-       sum=0;
-        for (int i = 0; i < residentialDensityMatrix.length; i++) {
-            for (int j = 0; j < residentialDensityMatrix[0].length; j++) {
-            	residentialDensityList.add(residentialDensityMatrix[i][j]);
-            	sum+=residentialDensityMatrix[i][j];
-            }
-        }
-        System.out.println(sum);	
-        System.out.println(residentialDensityList.get(0));
-        
-        
 	}
 	
 	
 	
-	private static void loadCoord(int file_id) {
+	//Load a matrix
+	private static void loadMatrix(int file_id, String groupName) {
 		 int groupId = -1;
 		 int dataspace_id = -1;
 		 int dataset_id = -1;
-		 long [] dims;
+		 long [] dims = null;
 	     int rank = 0;
 	     
-		 //Open group
-        try {
-        	if (file_id >= 0)
-       		 	groupId = H5.H5Gopen(file_id, GRID_GROUPNAME, HDF5Constants.H5P_DEFAULT);
-   		} catch (HDF5LibraryException | NullPointerException e) {
-   			e.printStackTrace();
-   			throw new RuntimeException(e);
-   		}    
+		 //Open group and dataset
+	     try {
+	    	 if (file_id >= 0)
+	    		 groupId = H5.H5Gopen(file_id, groupName, HDF5Constants.H5P_DEFAULT);
+	    	 if (groupId >= 0)
+	    		 dataset_id = H5.H5Dopen(groupId, DATASETNAME, HDF5Constants.H5P_DEFAULT);
+	     } catch (HDF5LibraryException | NullPointerException e) {
+	    	 e.printStackTrace();
+	    	 throw new RuntimeException(e);
+	     }    
 
-        // Open dataset.
-        try {
-            if (groupId >= 0)
-                dataset_id = H5.H5Dopen(groupId, DATASETNAME, HDF5Constants.H5P_DEFAULT);
-        }
-        catch (Exception e) {
-            e.printStackTrace();
-            throw new RuntimeException(e);
-        }
 
-        // Get dataspace
-        try {
-            if (dataset_id >= 0)
-                dataspace_id = H5.H5Dget_space(dataset_id);
-        }
-        catch (Exception e) {
-            e.printStackTrace();
-            throw new RuntimeException(e);
-        }
+	     // Get dataspace and determine dataset parameters
+	     try {
+	    	 if (dataset_id >= 0){
+	    		 dataspace_id = H5.H5Dget_space(dataset_id);
+	    		 rank = H5.H5Sget_simple_extent_ndims ( dataspace_id );
+		    	 dims= new long[rank];
+		    	 H5.H5Sget_simple_extent_dims (dataspace_id , dims ,null );
+	    	 }
+	     }
+	     catch (HDF5LibraryException | NullPointerException e) {
+	    	 e.printStackTrace();
+	    	 throw new RuntimeException(e);
+	     }
 
-        
-        /* Determine dataset parameters */
-		try {
-			rank = H5.H5Sget_simple_extent_ndims ( dataspace_id );
-			dims= new long[rank];
-			H5.H5Sget_simple_extent_dims (dataspace_id , dims ,null );
-		} catch (HDF5LibraryException | NullPointerException e) {
-			e.printStackTrace();
-			throw new RuntimeException(e);
-		}
-
-	       
-        /* Create dataspace */
-        try {
-			dataspace_id = H5.H5Screate_simple ( rank , dims , null);
-		} catch (NullPointerException | HDF5Exception e) {
-			e.printStackTrace();
-			throw new RuntimeException(e);
-		}
-  
+	     
+		 // Allocate matrix and read data
+	     try {
+	    	 if (dims != null){
+	    		 switch(groupName) {
+	       			case GRID_GROUPNAME:
+	       				coordUTMMatrix = new double[(int) dims[0]][(int) dims[1]][(int) dims[2]];
+	       				H5.H5Dread(dataset_id, HDF5Constants.H5T_NATIVE_DOUBLE, HDF5Constants.H5S_ALL, HDF5Constants.H5S_ALL, HDF5Constants.H5P_DEFAULT, coordUTMMatrix);
+	       				break;
+	       			case ACTIVITY_DENSITY_GROUPNAME:
+	       				activityDensityMatrix = new double[(int) dims[0]][(int) dims[1]];
+	       				H5.H5Dread(dataset_id, HDF5Constants.H5T_NATIVE_DOUBLE, HDF5Constants.H5S_ALL, HDF5Constants.H5S_ALL, HDF5Constants.H5P_DEFAULT, activityDensityMatrix);
+	       				break;
+	       			case RESIDENTIAL_DENSITY_GROUPNAME:
+	       				residentialDensityMatrix = new double[(int) dims[0]][(int) dims[1]];
+	       				H5.H5Dread(dataset_id, HDF5Constants.H5T_NATIVE_DOUBLE, HDF5Constants.H5S_ALL, HDF5Constants.H5S_ALL, HDF5Constants.H5P_DEFAULT, residentialDensityMatrix);
+	       				break;
+	       			default:
+	       				throw new IllegalArgumentException("Invalid group name: " + groupName);
+	    		 }
+	    	 }
+	     }
+	     catch (Exception e) {
+	    	 e.printStackTrace();
+	    	 throw new RuntimeException(e);
+	     }
        
-        // Allocate two-dimensional arrays.
-        coordMatrix = new double[(int) dims[0]][(int) dims[1]][(int) dims[2]];
-        // Read data
-        try {
-            if (dataset_id >= 0)
-                H5.H5Dread(dataset_id, HDF5Constants.H5T_NATIVE_DOUBLE, HDF5Constants.H5S_ALL, HDF5Constants.H5S_ALL,
-                        HDF5Constants.H5P_DEFAULT, coordMatrix);
-        }
-        catch (Exception e) {
-            e.printStackTrace();
-            throw new RuntimeException(e);
-        }
-     // End access to data and release resources.
-        try {
-            if (dataset_id >= 0)
-                H5.H5Dclose(dataset_id);
-            if (dataspace_id >= 0)
-                H5.H5Sclose(dataspace_id);
-            if (groupId >= 0)
-                H5.H5Gclose(groupId);
-        }
-        catch (Exception e) {
-            e.printStackTrace();
-            throw new RuntimeException(e);
-        }
+	     // End access to data and release resources.
+	     try {
+	    	 if (dataset_id >= 0)
+	    		 H5.H5Dclose(dataset_id);
+	    	 if (dataspace_id >= 0)
+	    		 H5.H5Sclose(dataspace_id);
+	    	 if (groupId >= 0)
+	    		 H5.H5Gclose(groupId);
+	     }
+	     catch (Exception e) {
+	    	 e.printStackTrace();
+	    	 throw new RuntimeException(e);
+	     }
 	}
 
 	
-	
-	private static double[][] loadDensity(int file_id, String groupName) {
-		 int groupId = -1;
-		 int dataspace_id = -1;
-		 int dataset_id = -1;
-		 long [] dims;
-	     int rank = 0;
-	     double [][] matrix;
-		 
-		 //Open group
-        try {
-        	if (file_id >= 0)
-       		 	groupId = H5.H5Gopen(file_id, groupName, HDF5Constants.H5P_DEFAULT);
-   		} catch (HDF5LibraryException | NullPointerException e) {
-   			e.printStackTrace();
-   			throw new RuntimeException(e);
-   		}    
-
-        // Open dataset.
-        try {
-            if (groupId >= 0)
-                dataset_id = H5.H5Dopen(groupId, DATASETNAME, HDF5Constants.H5P_DEFAULT);
-        }
-        catch (Exception e) {
-            e.printStackTrace();
-            throw new RuntimeException(e);
-        }
-
-        // Get dataspace
-        try {
-            if (dataset_id >= 0)
-                dataspace_id = H5.H5Dget_space(dataset_id);
-        }
-        catch (Exception e) {
-            e.printStackTrace();
-            throw new RuntimeException(e);
-        }
-
-        
-        /* Determine dataset parameters */
-		try {
-			rank = H5.H5Sget_simple_extent_ndims ( dataspace_id );
-			dims= new long[rank];
-			H5.H5Sget_simple_extent_dims (dataspace_id , dims ,null );
-		} catch (HDF5LibraryException | NullPointerException e) {
-			e.printStackTrace();
-			throw new RuntimeException(e);
-		}
-
-	       
-        /* Create dataspace */
-        try {
-			dataspace_id = H5.H5Screate_simple ( rank , dims , null);
-		} catch (NullPointerException | HDF5Exception e) {
-			e.printStackTrace();
-			throw new RuntimeException(e);
-		}
-
-        // Allocate two-dimensional arrays.
-        matrix = new double[(int) dims[0]][(int) dims[1]];
-
-        // Read data
-        try {
-            if (dataset_id >= 0)
-                H5.H5Dread(dataset_id, HDF5Constants.H5T_NATIVE_DOUBLE, HDF5Constants.H5S_ALL, HDF5Constants.H5S_ALL,
-                        HDF5Constants.H5P_DEFAULT, matrix);
-        }
-        catch (Exception e) {
-            e.printStackTrace();
-            throw new RuntimeException(e);
-        }
-        
-        
-        // End access to data and release resources.
-        try {
-            if (dataset_id >= 0)
-                H5.H5Dclose(dataset_id);
-            if (dataspace_id >= 0)
-                H5.H5Sclose(dataspace_id);
-            if (groupId >= 0)
-                H5.H5Gclose(groupId);
-        }
-        catch (Exception e) {
-            e.printStackTrace();
-            throw new RuntimeException(e);
-        }
-        return matrix;
-	}
-
 	
 	private static void displayMatrix(double[][] data) {
 		//DecimalFormat format = new DecimalFormat("#,##0.0000000000000000000000");

@@ -8,6 +8,11 @@ public class LatLongCoordinate {
 		longitude = longi;
 	}
 	
+	public LatLongCoordinate(LatLongCoordinate coord) {
+		latitude = coord.getLatitude();
+		longitude = coord.getLongitude();
+	}
+	
 	public LatLongCoordinate(UTMCoordinate utm) {
 		double north;
 		
@@ -33,5 +38,10 @@ public class LatLongCoordinate {
 	
 	public double getLongitude() {
 		return longitude;
+	}
+	
+	@Override
+	public String toString() {
+		return getLatitude()+" "+getLongitude();
 	}
 }

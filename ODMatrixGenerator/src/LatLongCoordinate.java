@@ -9,15 +9,12 @@ public class LatLongCoordinate {
 	}
 	
 	public LatLongCoordinate(UTMCoordinate utm) {
-		double hemisphere;
 		double north;
 		
 		if (utm.getLetter()>'M'){
-			hemisphere='N';
 			north = utm.getNorthing();
 		}
-		else{
-			hemisphere='S'; 
+		else{ 
 			north = utm.getNorthing() - 10000000;
 		}
 		

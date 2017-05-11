@@ -15,7 +15,7 @@ import hdf.hdf5lib.HDF5Constants;
 import hdf.hdf5lib.exceptions.HDF5LibraryException;
 
 public class Main {
-    private static final String FILENAME = "input\\Villeurbanne.h5";
+    private static final String FILENAME = "input\\Lyon.h5";
     private static final String ACTIVITY_DENSITY_GROUPNAME = "kde_activity_30";
     private static final String RESIDENTIAL_DENSITY_GROUPNAME = "kde_residential_30";
     private static final String GRID_GROUPNAME = "xy_grid_30";

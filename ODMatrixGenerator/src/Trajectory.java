@@ -1,18 +1,20 @@
+import com.vividsolutions.jts.geom.Coordinate;
 
+/** Class representing a traject starting --> arrival with lat/long coordinates */
 public class Trajectory {
-	private LatLongCoordinate starting;
-	private LatLongCoordinate arrival;
+	private Coordinate starting;
+	private Coordinate arrival;
 	
-	public Trajectory(LatLongCoordinate start, LatLongCoordinate arrival) {
+	public Trajectory(Coordinate start, Coordinate arrival) {
 		this.starting = start;
 		this.arrival = arrival;
 	}
 	
-	public LatLongCoordinate getStarting() {
+	public Coordinate getStarting() {
 		return starting;
 	}
 	
-	public LatLongCoordinate getArrival() {
+	public Coordinate getArrival() {
 		return arrival;
 	}
 	

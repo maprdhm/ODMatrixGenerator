@@ -1,38 +1,46 @@
-import java.io.BufferedWriter;
+import java.awt.Color;
 import java.io.File;
-import java.io.FileWriter;
 import java.io.IOException;
-import java.io.Writer;
 import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.Map;
 import java.util.Random;
 
-import javax.rmi.CORBA.Tie;
+import org.tc33.jheatchart.HeatChart;
+
+import com.vividsolutions.jts.geom.Coordinate;
 
 import hdf.hdf5lib.H5;
 import hdf.hdf5lib.HDF5Constants;
 import hdf.hdf5lib.exceptions.HDF5LibraryException;
 
 public class Main {
-    private static final String FILENAME = "input\\Lyon.h5";
-    private static final String ACTIVITY_DENSITY_GROUPNAME = "kde_activity_30";
-    private static final String RESIDENTIAL_DENSITY_GROUPNAME = "kde_residential_30";
-    private static final String GRID_GROUPNAME = "xy_grid_30";
+    private static final String FILENAME = "input\\Clermont-Ferrand.h5";
+    private static final String BBOX_GROUPNAME = "bbox";
+    private static final String ACTIVITY_DENSITY_GROUPNAME = "kde_activity_100";
+    private static final String RESIDENTIAL_DENSITY_GROUPNAME = "kde_residential_100";
+    private static final String GRID_GROUPNAME = "xy_grid_100";
+    private static final String BBOX_DATASETNAME = "values";
     private static final String DATASETNAME = "block0_values";
-    private static String outputFile="output\\trajectories.txt";
+    private static String outputFileJson="output\\trajectories_";
+    private static String cityName;
+    private static String outputDirHeatMap="output\\HeatMaps\\";
 
     private static double [][] activityDensityMatrix;
     private static double [][] residentialDensityMatrix;
     private static double [][][] coordUTMMatrix;
+    private static double [] bboxMatrix;
     
-    private static ArrayList<LatLongCoordinate> coordList;
+    private static ArrayList<Coordinate> coordList;
     private static ArrayList<Double> activityDensityList;
     private static ArrayList<Double> residentialDensityList;
+    private static ArrayList<Double> activityDensityListCumul;
+    private static ArrayList<Double> residentialDensityListCumul;
     
     private static ArrayList<Trajectory> trajectories;
+    private static int[] randomResidences, randomActivities;
+    
     
     public static void main(String[] args) {
+    	cityName = FILENAME.substring(FILENAME.lastIndexOf("\\")+1, FILENAME.lastIndexOf("."));
     	loadData();
     	/* displayMatrix(activityDensityMatrix);   
         displayMatrix(residentialDensityMatrix);   
@@ -40,43 +48,55 @@ public class Main {
     	matrixToLists();
     	listsToCumulativeLists();
     	
-    	/*System.out.println(activityDensityList.get(activityDensityList.size()-1));
-    	System.out.println(residentialDensityList.get(residentialDensityList.size()-1));
-    	*/
-    	generateTrajectories(1000);
-
-    /*	for (int i=0;i<trajectories.size();i++)
-    		System.out.println(trajectories.get(i).getStarting()+" "+trajectories.get(i).getArrival());*/
+    	generateTrajectories(100000);
+    	outputFileJson+= cityName +".json";
+    	JSONFileWriter.writeTrajectories(trajectories, outputFileJson);
     	
-    	//writeTrajectories();
-    	
-    	JSONFileWriter.writeTrajectories(trajectories, "trajectories.json");
+    	drawHeatMaps();
     }
-    
-    
-    
-    private static void writeTrajectories() {
-		FileWriter writer;
+
+
+    //Draw 2 heat map with random residences/activities
+	private static void drawHeatMaps() {
+		int nbLines = coordUTMMatrix.length;
+		int nbCols = coordUTMMatrix[0].length;
+		double[][] activityData = new double [nbLines][nbCols];
+		double[][] residentialData = new double [nbLines][nbCols];
+		
+	    for (int i = 0; i < randomActivities.length; i++)
+	    	activityData[nbLines-(i/nbCols)-1][i%nbCols] = randomActivities[i];
+	    for (int i = 0; i < randomResidences.length; i++)
+	    	residentialData[nbLines-(i/nbCols)-1][i%nbCols] = randomResidences[i];
+
+	    
+		HeatChart activityHeatMap = new HeatChart(activityData);
+		activityHeatMap.setTitle("Activity heat map");
+		 activityHeatMap.setHighValueColour(Color.RED);
+		 activityHeatMap.setLowValueColour(Color.BLUE);
+		 
+		HeatChart residentialHeatMap = new HeatChart(residentialData);
+		residentialHeatMap.setTitle("Residential heat map");
+		residentialHeatMap.setHighValueColour(Color.RED);
+		residentialHeatMap.setLowValueColour(Color.BLUE);
+		
 		try {
-			writer = new FileWriter(outputFile);
-			for(Trajectory t: trajectories) {
-				  writer.write(t.toString());
-				  writer.write("\n");
-			}
-			writer.close();
-			
+			File activityHMFile = new File(outputDirHeatMap+"activityHeatMap_"+cityName+".png");
+			activityHMFile.mkdirs();
+			activityHeatMap.saveToFile(activityHMFile);
+			residentialHeatMap.saveToFile(new File(outputDirHeatMap+"residentialHeatMap_"+cityName+".png"));
 		} catch (IOException e) {
 			e.printStackTrace();
-			throw new RuntimeException(e);
-		} 
+		}
 	}
 
 
-
+	//Generate random trajectories
 	private static void generateTrajectories(int nbTrajects) {  	
 		trajectories = new ArrayList<>();
+		randomResidences = new int[coordList.size()];
+		randomActivities = new int[coordList.size()];
 		 Random rand = new Random(987654321);
-		 // Random rand = new Random(System.currentTimeMillis());
+		// Random rand = new Random(System.currentTimeMillis());
 		 for(int i=0; i < nbTrajects; i++)
 		 {
 			 int activityIterator = 0;
@@ -84,62 +104,85 @@ public class Main {
 			 double randActiv = rand.nextDouble();
 			 double randResid = rand.nextDouble();
 
-			 while(activityIterator< activityDensityList.size() &&
-					 residentialIterator < residentialDensityList.size() && 
-					 (randActiv>activityDensityList.get(activityIterator) || 
-							 randResid> residentialDensityList.get(residentialIterator)))
+			 while(activityIterator< activityDensityListCumul.size() &&
+					 residentialIterator < residentialDensityListCumul.size() && 
+					 (randActiv>activityDensityListCumul.get(activityIterator) || 
+							 randResid> residentialDensityListCumul.get(residentialIterator)))
 			 {
-				 if(randActiv>activityDensityList.get(activityIterator))
+				 if(randActiv>activityDensityListCumul.get(activityIterator))
 						 activityIterator++;
-				 if(randResid>residentialDensityList.get(residentialIterator))
+				 if(randResid>residentialDensityListCumul.get(residentialIterator))
 					 residentialIterator++;
 			 }
-			 LatLongCoordinate residence = new LatLongCoordinate(coordList.get(residentialIterator));
-			 LatLongCoordinate activity =  new LatLongCoordinate(coordList.get(activityIterator));
-			 trajectories.add(new Trajectory(residence, activity));
+			 if(residentialIterator<coordList.size() && activityIterator < coordList.size()){
+				 Coordinate residence = new Coordinate(coordList.get(residentialIterator));
+				 Coordinate activity =  new Coordinate(coordList.get(activityIterator));
+				 randomResidences[residentialIterator]+=1;
+				 randomActivities[activityIterator]+=1;
+				 trajectories.add(new Trajectory(residence, activity));
+			 }
 		 }
 	}
 
 
-
+	//Convert lists to cumulative lists
 	private static void listsToCumulativeLists() {
-		for(int i=1; i< activityDensityList.size(); i++)
-			activityDensityList.set(i, activityDensityList.get(i)+activityDensityList.get(i-1));
-		for(int i=1; i< residentialDensityList.size(); i++)
-			residentialDensityList.set(i, residentialDensityList.get(i)+residentialDensityList.get(i-1));
+		activityDensityListCumul =  activityDensityList;
+		residentialDensityListCumul = residentialDensityList;
+		
+		for(int i=1; i< activityDensityListCumul.size(); i++)
+			activityDensityListCumul.set(i, activityDensityListCumul.get(i)+activityDensityListCumul.get(i-1));
+		for(int i=1; i< residentialDensityListCumul.size(); i++)
+			residentialDensityListCumul.set(i, residentialDensityListCumul.get(i)+residentialDensityListCumul.get(i-1));
 	}
 
 
-
+	// Convert 3D coordinates matrix to coordinate list / 2D activity matrix to activity list / 2 D residential matrix to residential list
 	private static void matrixToLists() {
-    	coordList =  new ArrayList<LatLongCoordinate>();
-    	activityDensityList =  new ArrayList();
-    	residentialDensityList =  new ArrayList();
+    	coordList =  new ArrayList<Coordinate>();
+    	activityDensityList =  new ArrayList<Double>();
+    	residentialDensityList =  new ArrayList<Double>();
     	
-    	for (int j = 0; j < coordUTMMatrix[0].length; j++) {
-    		for (int i = 0; i < coordUTMMatrix.length; i++) {
-    			UTMCoordinate utm=new UTMCoordinate(coordUTMMatrix[i][j][0], coordUTMMatrix[i][j][1], 31, 'T');
-    			LatLongCoordinate latlong=new LatLongCoordinate(utm);
-    			coordList.add(latlong);
-    		}   
+    	UTMCoordinate bboxCenter = computeUTMZoneLetter();
+    	if(coordUTMMatrix[0].length == activityDensityMatrix.length 
+    		&& coordUTMMatrix[0].length == residentialDensityMatrix.length
+    		&& coordUTMMatrix.length ==  activityDensityMatrix[0].length
+    		&&  coordUTMMatrix.length == residentialDensityMatrix[0].length)
+    	{
+	    	for (int j = 0; j < coordUTMMatrix[0].length; j++) {
+	    		for (int i = 0; i < coordUTMMatrix.length; i++) {
+	    			UTMCoordinate utm=new UTMCoordinate(coordUTMMatrix[i][j][0], coordUTMMatrix[i][j][1], bboxCenter.getZone(), bboxCenter.getLetter());
+	    			Coordinate latlong = utm.UTMToLatLong();
+	    			coordList.add(latlong);
+	    		}   
+	    	}
+	    	
+	    	for (int i = 0; i < activityDensityMatrix.length; i++) {
+	    		for (int j = 0; j < activityDensityMatrix[0].length; j++) {
+	    			activityDensityList.add(activityDensityMatrix[i][j]);
+	    		}
+	    	}
+	
+	    	for (int i = 0; i < residentialDensityMatrix.length; i++) {
+	    		for (int j = 0; j < residentialDensityMatrix[0].length; j++) {
+	    			residentialDensityList.add(residentialDensityMatrix[i][j]);
+	             }
+	         } 
     	}
-    	
-    	for (int i = 0; i < activityDensityMatrix.length; i++) {
-    		for (int j = 0; j < activityDensityMatrix[0].length; j++) {
-    			activityDensityList.add(activityDensityMatrix[i][j]);
-    		}
-    	}
+	}
 
-    	for (int i = 0; i < residentialDensityMatrix.length; i++) {
-    		for (int j = 0; j < residentialDensityMatrix[0].length; j++) {
-    			residentialDensityList.add(residentialDensityMatrix[i][j]);
-             }
-         } 
+
+	//Compute the UTM coordinates of bbox center
+	private static UTMCoordinate computeUTMZoneLetter() {
+		double lat = (bboxMatrix[1]+bboxMatrix[2]) /2.0;
+		double lon = (bboxMatrix[0]+bboxMatrix[3]) /2.0;
+		UTMCoordinate utmCenter =  new UTMCoordinate(lat, lon);
+		return utmCenter;
 	}
 
 
 
-	//Load data from .h5 file in matrix
+	//Load needed data from .h5 file in matrix
 	private static void loadData() {
 		int file_id = -1;
 
@@ -151,9 +194,10 @@ public class Main {
             throw new RuntimeException(e);
         }
         
-        loadMatrix(file_id, ACTIVITY_DENSITY_GROUPNAME);
-        loadMatrix(file_id, RESIDENTIAL_DENSITY_GROUPNAME);
-        loadMatrix(file_id, GRID_GROUPNAME);
+        loadMatrix(file_id, BBOX_GROUPNAME, BBOX_DATASETNAME);
+        loadMatrix(file_id, ACTIVITY_DENSITY_GROUPNAME, DATASETNAME);
+        loadMatrix(file_id, RESIDENTIAL_DENSITY_GROUPNAME, DATASETNAME);
+        loadMatrix(file_id, GRID_GROUPNAME, DATASETNAME);
         
         try {
         	if (file_id >= 0)
@@ -164,11 +208,11 @@ public class Main {
             throw new RuntimeException(e);
         }
 	}
-	
-	
-	
-	//Load a matrix
-	private static void loadMatrix(int file_id, String groupName) {
+
+
+
+	//Load a matrix from hadoop file
+	private static void loadMatrix(int file_id, String groupName, String datasetName) {
 		 int groupId = -1;
 		 int dataspace_id = -1;
 		 int dataset_id = -1;
@@ -180,7 +224,7 @@ public class Main {
 	    	 if (file_id >= 0)
 	    		 groupId = H5.H5Gopen(file_id, groupName, HDF5Constants.H5P_DEFAULT);
 	    	 if (groupId >= 0)
-	    		 dataset_id = H5.H5Dopen(groupId, DATASETNAME, HDF5Constants.H5P_DEFAULT);
+	    		 dataset_id = H5.H5Dopen(groupId, datasetName, HDF5Constants.H5P_DEFAULT);
 	     } catch (HDF5LibraryException | NullPointerException e) {
 	    	 e.printStackTrace();
 	    	 throw new RuntimeException(e);
@@ -206,6 +250,10 @@ public class Main {
 	     try {
 	    	 if (dims != null){
 	    		 switch(groupName) {
+		    		 case BBOX_GROUPNAME:
+		       			bboxMatrix = new double[(int) dims[0]];
+		       			H5.H5Dread(dataset_id, HDF5Constants.H5T_NATIVE_DOUBLE, HDF5Constants.H5S_ALL, HDF5Constants.H5S_ALL, HDF5Constants.H5P_DEFAULT, bboxMatrix);
+		       			break;
 	       			case GRID_GROUPNAME:
 	       				coordUTMMatrix = new double[(int) dims[0]][(int) dims[1]][(int) dims[2]];
 	       				H5.H5Dread(dataset_id, HDF5Constants.H5T_NATIVE_DOUBLE, HDF5Constants.H5S_ALL, HDF5Constants.H5S_ALL, HDF5Constants.H5P_DEFAULT, coordUTMMatrix);
@@ -244,7 +292,7 @@ public class Main {
 	}
 
 	
-	
+	//Display a 2D matrix
 	private static void displayMatrix(double[][] data) {
 		//DecimalFormat format = new DecimalFormat("#,##0.0000000000000000000000");
         for (int i = 0; i < data.length; i++) {
@@ -258,6 +306,7 @@ public class Main {
         System.out.println();	
 	}
 	
+	//Display a 3D matrix
 	private static void displayMatrix(double[][][] data) {
 	    for (int i = 0; i < data.length; i++) {
 	        for (int j = 0; j < data[0].length; j++) {

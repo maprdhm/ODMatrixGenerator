@@ -13,7 +13,7 @@ import hdf.hdf5lib.HDF5Constants;
 import hdf.hdf5lib.exceptions.HDF5LibraryException;
 
 public class Main {
-    private static final String FILENAME = "input\\Clermont-Ferrand.h5";
+    private static final String FILENAME = "input\\Villeurbanne.h5";
     private static final String BBOX_GROUPNAME = "bbox";
     private static final String ACTIVITY_DENSITY_GROUPNAME = "kde_activity_100";
     private static final String RESIDENTIAL_DENSITY_GROUPNAME = "kde_residential_100";
@@ -55,11 +55,11 @@ public class Main {
     	drawHeatMaps();
     }
 
-
     //Draw 2 heat map with random residences/activities
 	private static void drawHeatMaps() {
-		int nbLines = coordUTMMatrix.length;
-		int nbCols = coordUTMMatrix[0].length;
+		int nbLines = coordUTMMatrix[0].length;
+		int nbCols = coordUTMMatrix.length;
+		
 		double[][] activityData = new double [nbLines][nbCols];
 		double[][] residentialData = new double [nbLines][nbCols];
 		
@@ -67,9 +67,8 @@ public class Main {
 	    	activityData[nbLines-(i/nbCols)-1][i%nbCols] = randomActivities[i];
 	    for (int i = 0; i < randomResidences.length; i++)
 	    	residentialData[nbLines-(i/nbCols)-1][i%nbCols] = randomResidences[i];
-
 	    
-		HeatChart activityHeatMap = new HeatChart(activityData);
+	    HeatChart activityHeatMap = new HeatChart(activityData);
 		activityHeatMap.setTitle("Activity heat map");
 		 activityHeatMap.setHighValueColour(Color.RED);
 		 activityHeatMap.setLowValueColour(Color.BLUE);

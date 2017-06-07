@@ -1,19 +1,28 @@
 import java.awt.Color;
 import java.io.File;
 import java.io.IOException;
+import java.nio.charset.Charset;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.Random;
 
 import org.tc33.jheatchart.HeatChart;
 
 import com.vividsolutions.jts.geom.Coordinate;
 
+import Projections.EPSG3035Coordinate;
+import Projections.UTMCoordinate;
 import hdf.hdf5lib.H5;
 import hdf.hdf5lib.HDF5Constants;
 import hdf.hdf5lib.exceptions.HDF5LibraryException;
+import net.iryndin.jdbf.core.DbfRecord;
+import net.iryndin.jdbf.reader.DbfReader;
 
 public class Main {
-    private static final String FILENAME = "input\\Villeurbanne.h5";
+	private static int NB_TRAJECTORIES = 100000;
+    private static final String HADOOP_FILENAME = "input\\Clermont-Ferrand.h5";
+    private static final String INSEE_POPULATION_FILENAME = "input\\car_m.dbf";
+    private static final double RESOLUTION = 200.0; // INSEE resolution en metre
     private static final String BBOX_GROUPNAME = "bbox";
     private static final String ACTIVITY_DENSITY_GROUPNAME = "kde_activity_100";
     private static final String RESIDENTIAL_DENSITY_GROUPNAME = "kde_residential_100";
@@ -39,34 +48,223 @@ public class Main {
     private static int[] randomResidences, randomActivities;
     
     
-    public static void main(String[] args) {
-    	cityName = FILENAME.substring(FILENAME.lastIndexOf("\\")+1, FILENAME.lastIndexOf("."));
-    	loadData();
-    	/* displayMatrix(activityDensityMatrix);   
-        displayMatrix(residentialDensityMatrix);   
-        displayMatrix(coordMatrix);*/
-    	matrixToLists();
-    	listsToCumulativeLists();
-    	
-    	generateTrajectories(100000);
-    	outputFileJson+= cityName +".json";
-    	JSONFileWriter.writeTrajectories(trajectories, outputFileJson);
+    public static void main(String[] args) 
+    {
+    	cityName = HADOOP_FILENAME.substring(HADOOP_FILENAME.lastIndexOf("\\")+1, HADOOP_FILENAME.lastIndexOf("."));
+
+    	//Load bbox data, grid data and activity density from h5 file
+    	int file_id = -1;
+        try {
+            file_id = H5.H5Fopen(HADOOP_FILENAME, HDF5Constants.H5F_ACC_RDONLY, HDF5Constants.H5P_DEFAULT);
+            loadMatrix(file_id, BBOX_GROUPNAME, BBOX_DATASETNAME);
+            loadMatrix(file_id, GRID_GROUPNAME, DATASETNAME);
+            loadMatrix(file_id, ACTIVITY_DENSITY_GROUPNAME, DATASETNAME);
+            H5.H5Fclose(file_id);
+            }
+            catch (Exception e) {
+                e.printStackTrace();
+                throw new RuntimeException(e);
+            }
+            
+        
+        //Load population in bbox
+    	long beginTime = System.currentTimeMillis();
+    	List<PopulationTile> populations = loadPopulation();
+		System.out.println("Time to load population : " + (System.currentTimeMillis() - beginTime) + "ms.");
+    
+		if(populations==null){
+			System.out.println("Error in population load...");
+			return;
+		}
+
+		
+		if(populations.isEmpty()){
+			try {
+				file_id = H5.H5Fopen(HADOOP_FILENAME, HDF5Constants.H5F_ACC_RDONLY, HDF5Constants.H5P_DEFAULT);
+		        loadMatrix(file_id, RESIDENTIAL_DENSITY_GROUPNAME, DATASETNAME);
+		        H5.H5Fclose(file_id);
+			}
+	        catch (Exception e) {
+	            e.printStackTrace();
+	        }
+		}
+		
+		beginTime = System.currentTimeMillis();
+		matrixToLists();
+		listsToCumulativeLists();
+		System.out.println("Time to convert in list : " + (System.currentTimeMillis() - beginTime) + "ms.");
+
+		beginTime = System.currentTimeMillis();
+		generateTrajectories(populations);
+		System.out.println("Time to generate trajectories : " + (System.currentTimeMillis() - beginTime) + "ms.");
     	
     	drawHeatMaps();
+    	outputFileJson+= cityName +".json";
+    	JSONFileWriter.writeTrajectories(trajectories, outputFileJson);
+    
+    }
+    
+    
+    
+  //Generate random trajectories
+  	private static void generateTrajectories(List<PopulationTile> populationTiles) {  	
+  		trajectories = new ArrayList<>();
+  		randomResidences = new int[coordList.size()];
+  		randomActivities = new int[coordList.size()];
+  		
+  		if(!populationTiles.isEmpty()){
+  			NB_TRAJECTORIES = 0;
+  			for(PopulationTile p: populationTiles)
+  				NB_TRAJECTORIES+=Math.round(p.getPopulation());
+  		}
+		System.out.println(NB_TRAJECTORIES);
+
+		List <Coordinate> listResidentialCoordinates = loadResidentialCoordinates(populationTiles);
+  		
+
+  		 Random rand = new Random(987654321);// Random rand = new Random(System.currentTimeMillis());
+  		 for(int i=0; i < NB_TRAJECTORIES; i++){
+  			 Coordinate residence = null;
+  			 Coordinate activity = null;
+  			 
+  			 int activityIterator = 0;
+  			 double randActiv = rand.nextDouble();
+  			 
+  			 while(activityIterator< activityDensityListCumul.size() &&
+  				randActiv>activityDensityListCumul.get(activityIterator)) {
+  				 if(randActiv>activityDensityListCumul.get(activityIterator))
+  						 activityIterator++;
+  			 }
+  			 if(activityIterator < coordList.size()){
+  				 activity =  new Coordinate(coordList.get(activityIterator));
+  				 randomActivities[activityIterator]+=1;
+  			 }
+  			 
+  			 if(listResidentialCoordinates.isEmpty() && !residentialDensityListCumul.isEmpty()){
+  				 int residentialIterator = 0;
+  				 double randResid = rand.nextDouble();
+
+  				 while(residentialIterator < residentialDensityListCumul.size() && 
+  						randResid> residentialDensityListCumul.get(residentialIterator)){
+  					 if(randResid>residentialDensityListCumul.get(residentialIterator))
+  						 residentialIterator++;
+  				 }
+  				 if(residentialIterator<coordList.size()){
+  					 residence = new Coordinate(coordList.get(residentialIterator));
+  					 randomResidences[residentialIterator]+=1;
+  				 }
+  			 }
+  			 else{				  	 
+	  			 int randResid = rand.nextInt(listResidentialCoordinates.size());
+	  			 residence = listResidentialCoordinates.get(randResid);
+	  			 int id = getIdNearestGridPoint(residence);
+	  			 randomResidences[id]+=1;
+	  			 listResidentialCoordinates.remove(randResid);
+  			 }
+  			 
+  			 
+  			 if(residence != null && activity !=null){
+  				 trajectories.add(new Trajectory(residence, activity));
+  			 }
+  		 }
+  	}
+  	
+    
+    
+    private static List<Coordinate> loadResidentialCoordinates(List<PopulationTile> populationTiles) {
+    	List <Coordinate> listResidCoords = new ArrayList<>();
+    	Random randLat = new Random(12);
+    	Random randLon = new Random(23);
+    	
+		for(PopulationTile tile: populationTiles){
+			for(int i=0; i<(int)Math.round(tile.getPopulation());i++){
+				double lat = randLat.nextDouble()*(tile.getLatNorth()-tile.getLatSouth()) + tile.getLatSouth();
+				double lon = randLon.nextDouble()*(tile.getLonEast()-tile.getLonWest()) + tile.getLonWest();
+				Coordinate coord = new Coordinate(lon, lat);
+				listResidCoords.add(coord);
+			}
+		}
+		return listResidCoords;
     }
 
-    //Draw 2 heat map with random residences/activities
+
+
+	private static int getIdNearestGridPoint(Coordinate coord) {
+		int id = -1;
+		int cpt = 0;
+		double minDist = Integer.MAX_VALUE;
+		for(Coordinate coordGrid : coordList)
+		{
+			double dist = Math.sqrt(Math.pow(coord.y-coordGrid.y,2)+Math.pow(coord.x-coordGrid.x, 2));
+			//GISComputation.GPS2Meter(coord.y, coord.x, coordGrid.y, coordGrid.x); --> plus précis mais beaucoup plus lent. Pas besoin d'autant de précision ici
+			if (dist < minDist){
+				id = cpt;
+				minDist = dist;
+			}
+			cpt++;
+		}
+		return id;
+	}
+
+
+
+	//Load population from dbf file
+    private static List<PopulationTile> loadPopulation() 
+    {
+		List<PopulationTile> populations = new ArrayList<>();
+		PopulationTile.setResolution(RESOLUTION);
+	    Charset stringCharset = Charset.forName("Cp866");
+	    File dbfFile = new File(INSEE_POPULATION_FILENAME);
+	    if(!dbfFile.exists()){
+	    	System.out.println("Missing INSEE population file...");
+	    	return null;
+	    }
+		DbfRecord rec;
+			try (DbfReader reader = new DbfReader(dbfFile)) {
+	            while ((rec = reader.read()) != null) 
+	            {
+	                rec.setStringCharset(stringCharset);
+	                String id = rec.getString("idINSPIRE");
+	                double nbHab = Double.valueOf(rec.getString("ind_c"));
+	                double y_laea = Double.valueOf(id.substring(id.lastIndexOf("N")+1, id.lastIndexOf("E")))+RESOLUTION/2.0;
+	                double x_laea = Double.valueOf(id.substring(id.lastIndexOf("E")+1))+RESOLUTION/2.0;
+	            	EPSG3035Coordinate coords =  new EPSG3035Coordinate(x_laea, y_laea);
+	            	Coordinate coordLatLon = coords.EPSG3035ToLatLong();
+	            		
+	            	if(isInBBox(coordLatLon))
+	    				populations.add(new PopulationTile(coords,nbHab));
+	            }
+	            reader.close();
+	        } catch (IOException e) {
+				e.printStackTrace();
+				return null;
+			}
+    	return populations;
+   	}
+
+
+	//Test if a coordinate point is in the bbox matrix
+	private static boolean isInBBox(Coordinate coordLatLon) {
+		boolean isInBBox = false;
+		if(coordLatLon.y >= bboxMatrix[2] && coordLatLon.y <= bboxMatrix[1]
+				&& coordLatLon.x >=bboxMatrix[3] && coordLatLon.x<= bboxMatrix[0])
+			isInBBox=true;
+		return isInBBox;
+	}
+    
+    
+	//Draw 2 heat map with random residences/activities
 	private static void drawHeatMaps() {
 		int nbLines = coordUTMMatrix[0].length;
 		int nbCols = coordUTMMatrix.length;
 		
 		double[][] activityData = new double [nbLines][nbCols];
 		double[][] residentialData = new double [nbLines][nbCols];
-		
 	    for (int i = 0; i < randomActivities.length; i++)
 	    	activityData[nbLines-(i/nbCols)-1][i%nbCols] = randomActivities[i];
 	    for (int i = 0; i < randomResidences.length; i++)
 	    	residentialData[nbLines-(i/nbCols)-1][i%nbCols] = randomResidences[i];
+	    
 	    
 	    HeatChart activityHeatMap = new HeatChart(activityData);
 		activityHeatMap.setTitle("Activity heat map");
@@ -89,46 +287,10 @@ public class Main {
 	}
 
 
-	//Generate random trajectories
-	private static void generateTrajectories(int nbTrajects) {  	
-		trajectories = new ArrayList<>();
-		randomResidences = new int[coordList.size()];
-		randomActivities = new int[coordList.size()];
-		 Random rand = new Random(987654321);
-		// Random rand = new Random(System.currentTimeMillis());
-		 for(int i=0; i < nbTrajects; i++)
-		 {
-			 int activityIterator = 0;
-			 int residentialIterator = 0;
-			 double randActiv = rand.nextDouble();
-			 double randResid = rand.nextDouble();
-
-			 while(activityIterator< activityDensityListCumul.size() &&
-					 residentialIterator < residentialDensityListCumul.size() && 
-					 (randActiv>activityDensityListCumul.get(activityIterator) || 
-							 randResid> residentialDensityListCumul.get(residentialIterator)))
-			 {
-				 if(randActiv>activityDensityListCumul.get(activityIterator))
-						 activityIterator++;
-				 if(randResid>residentialDensityListCumul.get(residentialIterator))
-					 residentialIterator++;
-			 }
-			 if(residentialIterator<coordList.size() && activityIterator < coordList.size()){
-				 Coordinate residence = new Coordinate(coordList.get(residentialIterator));
-				 Coordinate activity =  new Coordinate(coordList.get(activityIterator));
-				 randomResidences[residentialIterator]+=1;
-				 randomActivities[activityIterator]+=1;
-				 trajectories.add(new Trajectory(residence, activity));
-			 }
-		 }
-	}
-
-
 	//Convert lists to cumulative lists
 	private static void listsToCumulativeLists() {
 		activityDensityListCumul =  activityDensityList;
 		residentialDensityListCumul = residentialDensityList;
-		
 		for(int i=1; i< activityDensityListCumul.size(); i++)
 			activityDensityListCumul.set(i, activityDensityListCumul.get(i)+activityDensityListCumul.get(i-1));
 		for(int i=1; i< residentialDensityListCumul.size(); i++)
@@ -143,25 +305,27 @@ public class Main {
     	residentialDensityList =  new ArrayList<Double>();
     	
     	UTMCoordinate bboxCenter = computeUTMZoneLetter();
-    	if(coordUTMMatrix[0].length == activityDensityMatrix.length 
-    		&& coordUTMMatrix[0].length == residentialDensityMatrix.length
-    		&& coordUTMMatrix.length ==  activityDensityMatrix[0].length
-    		&&  coordUTMMatrix.length == residentialDensityMatrix[0].length)
-    	{
-	    	for (int j = 0; j < coordUTMMatrix[0].length; j++) {
-	    		for (int i = 0; i < coordUTMMatrix.length; i++) {
-	    			UTMCoordinate utm=new UTMCoordinate(coordUTMMatrix[i][j][0], coordUTMMatrix[i][j][1], bboxCenter.getZone(), bboxCenter.getLetter());
-	    			Coordinate latlong = utm.UTMToLatLong();
-	    			coordList.add(latlong);
-	    		}   
-	    	}
-	    	
+    	
+    	for (int j = 0; j < coordUTMMatrix[0].length; j++) {
+    		for (int i = 0; i < coordUTMMatrix.length; i++) {
+    			UTMCoordinate utm=new UTMCoordinate(coordUTMMatrix[i][j][0], coordUTMMatrix[i][j][1], bboxCenter.getZone(), bboxCenter.getLetter());
+    			Coordinate latlong = utm.UTMToLatLong();
+    			coordList.add(latlong);
+    		}   
+    	}
+    	
+    	if(activityDensityMatrix !=null && coordUTMMatrix[0].length == activityDensityMatrix.length 
+    		&& coordUTMMatrix.length ==  activityDensityMatrix[0].length){
 	    	for (int i = 0; i < activityDensityMatrix.length; i++) {
 	    		for (int j = 0; j < activityDensityMatrix[0].length; j++) {
 	    			activityDensityList.add(activityDensityMatrix[i][j]);
 	    		}
 	    	}
+    	}
 	
+	
+ 		if(residentialDensityMatrix!=null && coordUTMMatrix[0].length == residentialDensityMatrix.length
+ 	    	&&  coordUTMMatrix.length == residentialDensityMatrix[0].length){
 	    	for (int i = 0; i < residentialDensityMatrix.length; i++) {
 	    		for (int j = 0; j < residentialDensityMatrix[0].length; j++) {
 	    			residentialDensityList.add(residentialDensityMatrix[i][j]);
@@ -177,35 +341,6 @@ public class Main {
 		double lon = (bboxMatrix[0]+bboxMatrix[3]) /2.0;
 		UTMCoordinate utmCenter =  new UTMCoordinate(lat, lon);
 		return utmCenter;
-	}
-
-
-
-	//Load needed data from .h5 file in matrix
-	private static void loadData() {
-		int file_id = -1;
-
-        try {
-            file_id = H5.H5Fopen(FILENAME, HDF5Constants.H5F_ACC_RDONLY, HDF5Constants.H5P_DEFAULT);
-        }
-        catch (Exception e) {
-            e.printStackTrace();
-            throw new RuntimeException(e);
-        }
-        
-        loadMatrix(file_id, BBOX_GROUPNAME, BBOX_DATASETNAME);
-        loadMatrix(file_id, ACTIVITY_DENSITY_GROUPNAME, DATASETNAME);
-        loadMatrix(file_id, RESIDENTIAL_DENSITY_GROUPNAME, DATASETNAME);
-        loadMatrix(file_id, GRID_GROUPNAME, DATASETNAME);
-        
-        try {
-        	if (file_id >= 0)
-                H5.H5Fclose(file_id);
-        }
-        catch (Exception e) {
-            e.printStackTrace();
-            throw new RuntimeException(e);
-        }
 	}
 
 

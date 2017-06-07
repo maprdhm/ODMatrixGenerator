@@ -1,43 +1,26 @@
-import java.io.BufferedWriter;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.util.ArrayList;
 
-import org.json.simple.JsonArray;
-import org.json.simple.JsonObject;
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
+import com.google.gson.stream.JsonWriter;
 
 /** Class to write json trajectories in file */
 public class JSONFileWriter {
-
-	public static void writeTrajectories(ArrayList<Trajectory> trajectories, String fileName){
-		JsonArray trajectoriesArray = new JsonArray();
-		for(Trajectory t : trajectories){
-			JsonObject trajJSONObj = new JsonObject();
-			JsonObject trajStartingJson = new JsonObject();
-			JsonObject trajArrivalJson = new JsonObject();
-			trajStartingJson.put("lat", t.getStarting().y);
-			trajStartingJson.put("lon", t.getStarting().x);
-			trajArrivalJson.put("lat", t.getArrival().y);
-			trajArrivalJson.put("lon", t.getArrival().x);
-			trajJSONObj.put("starting", trajStartingJson);
-			trajJSONObj.put("arrival", trajArrivalJson);
-			trajectoriesArray.add(trajJSONObj);
-		}
-		writeFile(trajectoriesArray, fileName);
-	}
 	
-	
-	
-	public static void writeFile(JsonArray array, String fileName){
-		try {
-			FileWriter fileWriter = new FileWriter(fileName);
-			BufferedWriter bufferedWriter = new BufferedWriter(fileWriter);
-			bufferedWriter.write(array.toJson());
-			bufferedWriter.flush();
-			bufferedWriter.close();
-			fileWriter.close();
-		} catch (IOException e){
+	public static void writeTrajectories(ArrayList<Trajectory> trajectories, String fileName) {	
+	    try {
+	        JsonWriter writer = new JsonWriter(new FileWriter(fileName));
+	        Gson gson = new GsonBuilder().serializeSpecialFloatingPointValues().create();
+	        writer.setIndent("  ");
+	        writer.beginArray();
+	        for(Trajectory t: trajectories)
+	        	gson.toJson(t, Trajectory.class, writer);
+	    	writer.endArray(); // ]
+	    	writer.close();
+	    }catch(IOException e){
 			e.printStackTrace();
-		}
+		}    
 	}
 }

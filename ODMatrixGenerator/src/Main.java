@@ -20,7 +20,7 @@ import net.iryndin.jdbf.reader.DbfReader;
 
 public class Main {
 	private static int NB_TRAJECTORIES = 100000;
-    private static final String HADOOP_FILENAME = "input\\Clermont-Ferrand.h5";
+    private static final String HADOOP_FILENAME = "input\\Villeurbanne.h5";
     private static final String INSEE_POPULATION_FILENAME = "input\\car_m.dbf";
     private static final double RESOLUTION = 200.0; // INSEE resolution en metre
     private static final String BBOX_GROUPNAME = "bbox";
@@ -71,13 +71,7 @@ public class Main {
     	long beginTime = System.currentTimeMillis();
     	List<PopulationTile> populations = loadPopulation();
 		System.out.println("Time to load population : " + (System.currentTimeMillis() - beginTime) + "ms.");
-    
-		if(populations==null){
-			System.out.println("Error in population load...");
-			return;
-		}
-
-		
+    		
 		if(populations.isEmpty()){
 			try {
 				file_id = H5.H5Fopen(HADOOP_FILENAME, HDF5Constants.H5F_ACC_RDONLY, HDF5Constants.H5P_DEFAULT);
@@ -122,7 +116,8 @@ public class Main {
 		List <Coordinate> listResidentialCoordinates = loadResidentialCoordinates(populationTiles);
   		
 
-  		 Random rand = new Random(987654321);// Random rand = new Random(System.currentTimeMillis());
+  		 //Random rand = new Random(987654321);
+		Random rand = new Random(System.currentTimeMillis());
   		 for(int i=0; i < NB_TRAJECTORIES; i++){
   			 Coordinate residence = null;
   			 Coordinate activity = null;
@@ -173,8 +168,8 @@ public class Main {
     
     private static List<Coordinate> loadResidentialCoordinates(List<PopulationTile> populationTiles) {
     	List <Coordinate> listResidCoords = new ArrayList<>();
-    	Random randLat = new Random(12);
-    	Random randLon = new Random(23);
+    	Random randLat = new Random(System.currentTimeMillis());//new Random(12);
+    	Random randLon = new Random(System.currentTimeMillis());//new Random(23);
     	
 		for(PopulationTile tile: populationTiles){
 			for(int i=0; i<(int)Math.round(tile.getPopulation());i++){
@@ -217,7 +212,7 @@ public class Main {
 	    File dbfFile = new File(INSEE_POPULATION_FILENAME);
 	    if(!dbfFile.exists()){
 	    	System.out.println("Missing INSEE population file...");
-	    	return null;
+	    	return populations;
 	    }
 		DbfRecord rec;
 			try (DbfReader reader = new DbfReader(dbfFile)) {

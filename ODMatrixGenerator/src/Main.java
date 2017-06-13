@@ -20,7 +20,7 @@ import net.iryndin.jdbf.reader.DbfReader;
 
 public class Main {
 	private static int NB_TRAJECTORIES = 100000;
-    private static final String HADOOP_FILENAME = "input\\Villeurbanne.h5";
+    private static final String HADOOP_FILENAME = "input\\Lyon.h5";
     private static final String INSEE_POPULATION_FILENAME = "input\\car_m.dbf";
     private static final double RESOLUTION = 200.0; // INSEE resolution en metre
     private static final String BBOX_GROUPNAME = "bbox";
@@ -168,8 +168,8 @@ public class Main {
     
     private static List<Coordinate> loadResidentialCoordinates(List<PopulationTile> populationTiles) {
     	List <Coordinate> listResidCoords = new ArrayList<>();
-    	Random randLat = new Random(System.currentTimeMillis());//new Random(12);
-    	Random randLon = new Random(System.currentTimeMillis());//new Random(23);
+    	Random randLat = new Random();
+    	Random randLon = new Random();
     	
 		for(PopulationTile tile: populationTiles){
 			for(int i=0; i<(int)Math.round(tile.getPopulation());i++){
